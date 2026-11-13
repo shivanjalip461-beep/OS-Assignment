@@ -1,0 +1,188 @@
+// Assignment 5: Virtual Memory and Page Replacement for ML Workloads
+// Algorithms: FIFO, LRU, Optimal
+#include <iostream>
+#include <vector>
+#include <string>
+#include <iomanip>
+using namespace std;
+
+struct Result {
+    string name;
+    int faults;
+    int hits;
+    double hitRatio;
+    double faultRatio;
+};
+
+// Returns the index of a page inside the frames, or -1 if it is not present
+int findPage(const vector<int> &frames, int page) {
+    for (size_t i = 0; i < frames.size(); i++)
+        if (frames[i] == page) return (int)i;
+    return -1;
+}
+
+// Prints one row of the trace table
+void printRow(int step, int page, const vector<int> &frames, bool fault) {
+    cout << setw(5) << step << setw(7) << page << "    |";
+    for (size_t i = 0; i < frames.size(); i++) {
+        if (frames[i] == -1) cout << setw(4) << "-";
+        else cout << setw(4) << frames[i];
+    }
+    cout << "    |  " << (fault ? "PAGE FAULT" : "PAGE HIT") << endl;
+}
+
+void printHeader(const string &name, int nFrames) {
+    cout << "\n==================== " << name << " ====================\n";
+    cout << " Step    Page    |";
+    for (int i = 1; i <= nFrames; i++) cout << setw(3) << "F" << i;
+    cout << "    |  Result\n";
+    cout << string(30 + 4 * nFrames, '-') << endl;
+}
+
+Result makeResult(const string &name, int faults, int total) {
+    Result r;
+    r.name = name;
+    r.faults = faults;
+    r.hits = total - faults;
+    r.hitRatio = (double)r.hits / total;
+    r.faultRatio = (double)faults / total;
+    return r;
+}
+
+void printSummary(const Result &r, int total) {
+    cout << string(30, '-') << endl;
+    cout << "Total references : " << total << endl;
+    cout << "Total page faults: " << r.faults << endl;
+    cout << "Total page hits  : " << r.hits << endl;
+    cout << fixed << setprecision(2);
+    cout << "Hit ratio        : " << r.hitRatio << " (" << r.hitRatio * 100 << "%)" << endl;
+    cout << "Fault ratio      : " << r.faultRatio << " (" << r.faultRatio * 100 << "%)" << endl;
+}
+
+// ---------------- FIFO ----------------
+Result fifo(const vector<int> &refs, int nFrames) {
+    vector<int> frames(nFrames, -1);
+    int pointer = 0, faults = 0;
+    printHeader("FIFO PAGE REPLACEMENT", nFrames);
+    for (size_t i = 0; i < refs.size(); i++) {
+        bool fault = false;
+        if (findPage(frames, refs[i]) == -1) {
+            fault = true;
+            faults++;
+            frames[pointer] = refs[i];            // replace the oldest page
+            pointer = (pointer + 1) % nFrames;    // move in circular order
+        }
+        printRow((int)i + 1, refs[i], frames, fault);
+    }
+    Result r = makeResult("FIFO", faults, (int)refs.size());
+    printSummary(r, (int)refs.size());
+    return r;
+}
+
+// ---------------- LRU ----------------
+Result lru(const vector<int> &refs, int nFrames) {
+    vector<int> frames(nFrames, -1);
+    vector<int> lastUsed(nFrames, -1);
+    int faults = 0;
+    printHeader("LRU PAGE REPLACEMENT", nFrames);
+    for (size_t i = 0; i < refs.size(); i++) {
+        bool fault = false;
+        int pos = findPage(frames, refs[i]);
+        if (pos != -1) {
+            lastUsed[pos] = (int)i;               // hit: refresh last-used time
+        } else {
+            fault = true;
+            faults++;
+            int victim = -1;
+            for (int j = 0; j < nFrames; j++)     // use an empty frame first
+                if (frames[j] == -1) { victim = j; break; }
+            if (victim == -1) {                   // otherwise least recently used
+                victim = 0;
+                for (int j = 1; j < nFrames; j++)
+                    if (lastUsed[j] < lastUsed[victim]) victim = j;
+            }
+            frames[victim] = refs[i];
+            lastUsed[victim] = (int)i;
+        }
+        printRow((int)i + 1, refs[i], frames, fault);
+    }
+    Result r = makeResult("LRU", faults, (int)refs.size());
+    printSummary(r, (int)refs.size());
+    return r;
+}
+
+// ---------------- Optimal ----------------
+Result optimal(const vector<int> &refs, int nFrames) {
+    vector<int> frames(nFrames, -1);
+    int faults = 0;
+    int n = (int)refs.size();
+    printHeader("OPTIMAL PAGE REPLACEMENT", nFrames);
+    for (int i = 0; i < n; i++) {
+        bool fault = false;
+        if (findPage(frames, refs[i]) == -1) {
+            fault = true;
+            faults++;
+            int victim = -1;
+            for (int j = 0; j < nFrames; j++)
+                if (frames[j] == -1) { victim = j; break; }
+            if (victim == -1) {
+                int farthest = -1;
+                for (int j = 0; j < nFrames; j++) {
+                    int next = n;                 // n means "never used again"
+                    for (int k = i + 1; k < n; k++)
+                        if (refs[k] == frames[j]) { next = k; break; }
+                    if (next > farthest) { farthest = next; victim = j; }
+                }
+            }
+            frames[victim] = refs[i];
+        }
+        printRow(i + 1, refs[i], frames, fault);
+    }
+    Result r = makeResult("Optimal", faults, n);
+    printSummary(r, n);
+    return r;
+}
+
+int main() {
+    int n, nFrames;
+    cout << "Virtual Memory and Page Replacement Simulator (ML Workload)\n";
+    cout << "Enter number of pages in the reference string: ";
+    cin >> n;
+    if (n <= 0) { cout << "Invalid length.\n"; return 1; }
+    vector<int> refs(n);
+    cout << "Enter the page reference string (" << n << " page numbers): ";
+    for (int i = 0; i < n; i++) cin >> refs[i];
+    cout << "Enter number of physical frames: ";
+    cin >> nFrames;
+    if (nFrames <= 0) { cout << "Invalid number of frames.\n"; return 1; }
+
+    cout << "\nReference string: ";
+    for (int i = 0; i < n; i++) cout << refs[i] << " ";
+    cout << "\nFrames          : " << nFrames << endl;
+
+    Result a = fifo(refs, nFrames);
+    Result b = lru(refs, nFrames);
+    Result c = optimal(refs, nFrames);
+
+    cout << "\n==================== COMPARISON ====================\n";
+    cout << left << setw(12) << "Algorithm" << setw(10) << "Faults" << setw(10) << "Hits"
+         << setw(14) << "Hit Ratio" << "Fault Ratio" << endl;
+    cout << string(54, '-') << endl;
+    Result all[3] = {a, b, c};
+    for (int i = 0; i < 3; i++) {
+        cout << left << setw(12) << all[i].name << setw(10) << all[i].faults
+             << setw(10) << all[i].hits << setw(14) << all[i].hitRatio
+             << all[i].faultRatio << endl;
+    }
+    cout << string(54, '-') << endl;
+
+    cout << "\nBest overall (fewest faults): Optimal with " << c.faults << " faults.\n";
+    cout << "(Optimal needs future knowledge, so it is only a benchmark.)\n";
+    if (a.faults < b.faults)
+        cout << "Best practical algorithm    : FIFO (" << a.faults << " faults vs LRU " << b.faults << ")\n";
+    else if (b.faults < a.faults)
+        cout << "Best practical algorithm    : LRU (" << b.faults << " faults vs FIFO " << a.faults << ")\n";
+    else
+        cout << "Best practical algorithm    : FIFO and LRU are equal (" << a.faults << " faults)\n";
+    return 0;
+}
